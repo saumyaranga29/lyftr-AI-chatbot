@@ -275,9 +275,6 @@ export default function App() {
                 </div>
               </div>
             </div>
-            <span className="font-extrabold text-base tracking-wider bg-gradient-to-r from-cyan-300 via-white to-purple-300 bg-clip-text text-transparent">
-              GATEWAY
-            </span>
           </div>
 
           {/* Glowing '+ New Chat' Pill Button */}
@@ -366,7 +363,6 @@ export default function App() {
         <header className="flex md:hidden items-center justify-between px-4 py-3 bg-[#0a0d1e]/80 backdrop-blur-xl border-b border-slate-800">
           <div className="flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-cyan-400" />
-            <span className="font-bold text-sm tracking-wider text-white">AI GATEWAY</span>
           </div>
           <div className="flex items-center gap-2">
             <button
