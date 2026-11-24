@@ -61,6 +61,17 @@ function generateSessionId(): string {
   return `s-${randomPart}${timePart}`;
 }
 
+function getTimeGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 12) {
+    return 'Good morning 👋';
+  } else if (hour >= 12 && hour < 17) {
+    return 'Good afternoon 👋';
+  } else {
+    return 'Good evening 👋';
+  }
+}
+
 const ACTION_CARDS = [
   {
     icon: Code2,
@@ -409,7 +420,7 @@ export default function App() {
                 {/* Greeting & Headline */}
                 <div className="text-left space-y-3">
                   <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white flex items-center gap-2">
-                    Hello 👋
+                    {getTimeGreeting()}
                   </h1>
                   <p className="text-base text-slate-400 font-light tracking-wide">
                     Your intelligent AI assistant
