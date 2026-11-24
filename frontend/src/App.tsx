@@ -124,6 +124,12 @@ const ACTION_CARDS = [
   }
 ];
 
+interface SavedSession {
+  id: string;
+  preview: string;
+  timestamp: string;
+}
+
 export default function App() {
   const [sessionId, setSessionId] = useState<string>('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -137,6 +143,8 @@ export default function App() {
   const [historyViewTab, setHistoryViewTab] = useState<'summary' | 'raw'>('summary');
   const [sessionHistoryData, setSessionHistoryData] = useState<any>(null);
   const [historyLoading, setHistoryLoading] = useState<boolean>(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [recentSessions, setRecentSessions] = useState<SavedSession[]>([]);
 
   const fetchSessionHistory = async () => {
     setHistoryLoading(true);
@@ -155,7 +163,6 @@ export default function App() {
       setHistoryLoading(false);
     }
   };
-  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -164,7 +171,65 @@ export default function App() {
     const newSession = generateSessionId();
     setSessionId(newSession);
     checkHealth();
+
+    try {
+      const saved = localStorage.getItem('ai_gateway_sessions');
+      if (saved) {
+        setRecentSessions(JSON.parse(saved));
+      }
+    } catch {
+      // Ignore
+    }
   }, []);
+
+  const saveSessionToStorage = (sessId: string, firstMsgPreview: string) => {
+    try {
+      const existing = localStorage.getItem('ai_gateway_sessions');
+      let list: SavedSession[] = existing ? JSON.parse(existing) : [];
+      const foundIdx = list.findIndex(s => s.id === sessId);
+      if (foundIdx === -1) {
+        list.unshift({
+          id: sessId,
+          preview: firstMsgPreview.substring(0, 32),
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        });
+        if (list.length > 8) list = list.slice(0, 8);
+        localStorage.setItem('ai_gateway_sessions', JSON.stringify(list));
+        setRecentSessions(list);
+      }
+    } catch {
+      // Ignore
+    }
+  };
+
+  const loadPastSession = async (targetId: string) => {
+    setIsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/sessions/${targetId}/messages`);
+      if (res.ok) {
+        const data = await res.json();
+        setSessionId(data.session_id);
+        const mapped: ChatMessage[] = (data.messages || []).map((m: any, i: number) => ({
+          id: `restored-${i}-${Date.now()}`,
+          role: m.role,
+          content: m.content,
+          metadata: m.metadata ? {
+            resolution_source: m.metadata.resolution_source,
+            model: 'gemini/gemini-2.5-flash',
+            latency_ms: 1,
+            input_tokens: m.metadata.input_tokens || 0,
+            output_tokens: m.metadata.output_tokens || 0
+          } : undefined,
+          timestamp: 'Restored'
+        }));
+        setMessages(mapped);
+      }
+    } catch (err: any) {
+      alert(`Could not load session: ${err.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -271,6 +336,7 @@ export default function App() {
         setMessages(prev => [...prev, errorMsg]);
       } else {
         const data = await res.json();
+        saveSessionToStorage(sessionId, trimmed);
         const assistantMsg: ChatMessage = {
           id: `msg-${Date.now()}-assistant`,
           role: 'assistant',
@@ -379,6 +445,32 @@ export default function App() {
               <span>Session Prompt</span>
             </button>
           </nav>
+
+          {/* Recent Chats List */}
+          {recentSessions.length > 0 && (
+            <div className="pt-3 border-t border-slate-800/60">
+              <div className="text-[10px] font-semibold tracking-wider uppercase text-slate-500 px-3 mb-1.5 flex items-center justify-between">
+                <span>Recent Chats</span>
+                <span className="text-[9px] font-mono text-cyan-400/80">SQLite</span>
+              </div>
+              <div className="space-y-1 max-h-40 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800 pr-1">
+                {recentSessions.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => loadPastSession(s.id)}
+                    className={`w-full text-left px-3 py-2 rounded-xl text-xs transition flex items-center justify-between group ${
+                      sessionId === s.id
+                        ? 'bg-indigo-600/25 border border-indigo-500/40 text-indigo-200 font-medium'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent'
+                    }`}
+                  >
+                    <span className="truncate pr-2 font-normal text-[11px]">{s.preview || s.id}</span>
+                    <ChevronRight className="w-3 h-3 text-slate-600 group-hover:text-cyan-400 shrink-0 transition" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Bottom Profile / Gateway Status Card */}
@@ -479,6 +571,16 @@ export default function App() {
                   <p className="text-base text-slate-400 font-light tracking-wide">
                     Your intelligent AI assistant
                   </p>
+
+                  {recentSessions.length > 0 && (
+                    <button
+                      onClick={() => loadPastSession(recentSessions[0].id)}
+                      className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-200 text-xs transition shadow-sm"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5 text-purple-400" />
+                      <span>Resume last chat: <strong className="text-white font-medium">"{recentSessions[0].preview}"</strong></span>
+                    </button>
+                  )}
 
                   {/* 4 Action Holographic Cards matching user screenshot */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-4">
