@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import FormattedMessage from './components/FormattedMessage';
 import {
   Send,
   Bot,
@@ -552,9 +553,7 @@ export default function App() {
                   data-testid="assistant-message"
                   className="bg-[#0b0e24]/80 backdrop-blur-xl border border-indigo-500/20 hover:border-indigo-500/40 rounded-3xl rounded-tl-md p-5 max-w-[92%] sm:max-w-[85%] text-sm shadow-[0_0_30px_rgba(0,0,0,0.4)] text-slate-100 space-y-4 transition"
                 >
-                  <div className="whitespace-pre-wrap leading-relaxed text-slate-200 font-normal">
-                    {msg.content}
-                  </div>
+                  <FormattedMessage content={msg.content} />
 
                   {/* Metadata Card Footer matching assignment test requirements */}
                   {msg.metadata && (
