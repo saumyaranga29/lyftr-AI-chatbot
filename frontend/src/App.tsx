@@ -72,6 +72,34 @@ function getTimeGreeting(): string {
   }
 }
 
+function getCleanSummary(content: string): { summary: string; hasCode: boolean; lang?: string } {
+  if (!content) return { summary: 'Empty message', hasCode: false };
+  if (content.includes('```')) {
+    const lines = content.split('\n');
+    const langMatch = content.match(/```([a-zA-Z0-9_-]+)?/);
+    const lang = langMatch && langMatch[1] ? langMatch[1] : 'code';
+    // Find first descriptive text line outside code fence if any
+    const descriptiveLine = lines.find(l => !l.trim().startsWith('```') && l.trim().length > 10 && !l.trim().startsWith('def ') && !l.trim().startsWith('function '));
+    const codeLineCount = lines.length;
+    if (descriptiveLine) {
+      return {
+        summary: `${descriptiveLine.trim()} (Contains ${lang} solution, ${codeLineCount} lines)`,
+        hasCode: true,
+        lang
+      };
+    }
+    return {
+      summary: `Generated ${lang.toUpperCase()} program solution (${codeLineCount} lines)`,
+      hasCode: true,
+      lang
+    };
+  }
+  if (content.length > 200) {
+    return { summary: content.substring(0, 200) + '...', hasCode: false };
+  }
+  return { summary: content, hasCode: false };
+}
+
 const ACTION_CARDS = [
   {
     icon: Code2,
@@ -105,6 +133,7 @@ export default function App() {
   const [simulateFailure, setSimulateFailure] = useState<string>('none');
   const [customSimulate, setCustomSimulate] = useState<string>('');
   const [activeModal, setActiveModal] = useState<'none' | 'failover' | 'settings' | 'history'>('none');
+  const [historyViewTab, setHistoryViewTab] = useState<'summary' | 'raw'>('summary');
   const [sessionHistoryData, setSessionHistoryData] = useState<any>(null);
   const [historyLoading, setHistoryLoading] = useState<boolean>(false);
 
@@ -770,50 +799,126 @@ export default function App() {
 
       {/* Stored SQLite History Viewer Modal */}
       {activeModal === 'history' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in">
           <div className="w-full max-w-2xl bg-[#0a0e24] border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 max-h-[85vh] flex flex-col">
             <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
               <div className="flex items-center gap-2 text-cyan-300 font-bold text-sm">
                 <Database className="w-4 h-4 text-cyan-400" />
-                <span>Stored SQLite History (GET /sessions/{sessionId}/messages)</span>
+                <span>Session Conversation History</span>
               </div>
-              <button onClick={() => setActiveModal('none')} className="text-slate-400 hover:text-white">
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                {/* View switcher tabs */}
+                <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+                  <button
+                    onClick={() => setHistoryViewTab('summary')}
+                    className={`px-3 py-1 rounded-lg transition font-medium ${
+                      historyViewTab === 'summary'
+                        ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Task Summary
+                  </button>
+                  <button
+                    onClick={() => setHistoryViewTab('raw')}
+                    className={`px-3 py-1 rounded-lg transition font-medium ${
+                      historyViewTab === 'raw'
+                        ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Raw API Contract
+                  </button>
+                </div>
+
+                <button onClick={() => setActiveModal('none')} className="text-slate-400 hover:text-white p-1 rounded-lg">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
-            <div className="text-xs text-slate-400 flex items-center justify-between">
-              <span>Direct SQLite Endpoint URL:</span>
-              <a
-                href={`${API_BASE_URL}/sessions/${sessionId}/messages`}
-                target="_blank"
-                rel="noreferrer"
-                className="font-mono text-cyan-400 underline hover:text-cyan-300 truncate max-w-xs"
-              >
-                {`${API_BASE_URL}/sessions/${sessionId}/messages`}
-              </a>
-            </div>
-
-            <div className="flex-1 overflow-y-auto bg-slate-950 rounded-2xl p-4 border border-slate-900 font-mono text-xs text-slate-300">
+            {/* Content Display */}
+            <div className="flex-1 overflow-y-auto bg-slate-950/90 rounded-2xl p-4 border border-slate-900 scrollbar-thin scrollbar-thumb-slate-800">
               {historyLoading ? (
-                <div className="flex items-center gap-2 text-slate-400 py-4">
-                  <Activity className="w-4 h-4 animate-spin text-cyan-400" />
-                  <span>Loading SQLite records for session...</span>
+                <div className="flex items-center justify-center gap-2.5 text-slate-400 py-12">
+                  <Activity className="w-5 h-5 animate-spin text-cyan-400" />
+                  <span className="text-xs">Fetching SQLite records for session...</span>
+                </div>
+              ) : sessionHistoryData?.error ? (
+                <div className="text-xs text-amber-300/90 p-4 bg-amber-500/10 rounded-xl border border-amber-500/20">
+                  {sessionHistoryData.error}
+                </div>
+              ) : historyViewTab === 'summary' ? (
+                <div className="space-y-3">
+                  {sessionHistoryData?.messages && sessionHistoryData.messages.length > 0 ? (
+                    sessionHistoryData.messages.map((m: any, i: number) => {
+                      const { summary, hasCode, lang } = getCleanSummary(m.content);
+                      const isUser = m.role === 'user';
+                      return (
+                        <div
+                          key={i}
+                          className={`p-3.5 rounded-2xl border transition ${
+                            isUser
+                              ? 'bg-purple-950/20 border-purple-500/20 text-slate-200'
+                              : 'bg-slate-900/60 border-slate-800 text-slate-300'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2 mb-1.5">
+                            <span
+                              className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full ${
+                                isUser
+                                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                                  : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                              }`}
+                            >
+                              {isUser ? 'User Prompt' : 'AI Output'}
+                            </span>
+
+                            {m.metadata && (
+                              <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono">
+                                <span className={m.metadata.resolution_source === 'LLM_CACHE' ? 'text-emerald-400 font-semibold' : 'text-cyan-400'}>
+                                  {m.metadata.resolution_source}
+                                </span>
+                                <span>&bull;</span>
+                                <span>Tokens: {m.metadata.input_tokens || 0} in / {m.metadata.output_tokens || 0} out</span>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="text-xs leading-relaxed text-slate-200">
+                            {summary}
+                          </div>
+
+                          {hasCode && (
+                            <div className="mt-2 inline-flex items-center gap-1.5 text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/15 border border-indigo-500/30 text-indigo-300">
+                              <Code2 className="w-3 h-3 text-cyan-400" />
+                              <span>{lang ? lang.toUpperCase() : 'Code'} output simplified (full code hidden in summary)</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="text-center py-8 text-xs text-slate-500">
+                      No messages recorded in this session yet.
+                    </div>
+                  )}
                 </div>
               ) : (
-                <pre className="whitespace-pre-wrap leading-relaxed">
+                /* Raw JSON View */
+                <pre className="font-mono text-xs text-slate-300 whitespace-pre-wrap leading-relaxed">
                   {JSON.stringify(sessionHistoryData, null, 2)}
                 </pre>
               )}
             </div>
 
-            <div className="flex items-center justify-between pt-2">
-              <span className="text-[11px] text-slate-400">
-                DB File: <code className="text-indigo-400">backend/app.db</code>
+            <div className="flex items-center justify-between pt-1 text-[11px] text-slate-400">
+              <span className="font-mono truncate max-w-sm">
+                Session: <span className="text-cyan-400">{sessionId}</span>
               </span>
               <button
                 onClick={() => setActiveModal('none')}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold"
+                className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-medium transition"
               >
                 Close
               </button>
