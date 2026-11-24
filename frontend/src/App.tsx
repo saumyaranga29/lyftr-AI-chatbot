@@ -92,6 +92,7 @@ interface ChatMessage {
   content: string;
   metadata?: MessageMetadata;
   timestamp: string;
+  isStreaming?: boolean;
 }
 
 interface HealthStatus {
@@ -392,14 +393,39 @@ function MainChatApp() {
       } else {
         const data = await res.json();
         saveSessionToStorage(sessionId, trimmed);
-        const assistantMsg: ChatMessage = {
-          id: `msg-${Date.now()}-assistant`,
+        const newMsgId = `msg-${Date.now()}-assistant`;
+        const fullReply = data.reply || '';
+        const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+        // Split response into tokens/words to create thinking/streaming typewriter cadence
+        const words = fullReply.split(/(\s+)/);
+
+        const initialAssistantMsg: ChatMessage = {
+          id: newMsgId,
           role: 'assistant',
-          content: data.reply,
+          content: '',
           metadata: data.metadata,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          timestamp: nowTime,
+          isStreaming: true
         };
-        setMessages(prev => [...prev, assistantMsg]);
+        setMessages(prev => [...prev, initialAssistantMsg]);
+
+        let idx = 0;
+        let accumulated = '';
+        const step = words.length > 100 ? 3 : words.length > 40 ? 2 : 1;
+
+        const intervalId = setInterval(() => {
+          if (idx < words.length) {
+            for (let s = 0; s < step && idx < words.length; s++) {
+              accumulated += words[idx];
+              idx++;
+            }
+            setMessages(prev => prev.map(m => m.id === newMsgId ? { ...m, content: accumulated } : m));
+          } else {
+            clearInterval(intervalId);
+            setMessages(prev => prev.map(m => m.id === newMsgId ? { ...m, isStreaming: false } : m));
+          }
+        }, 20);
       }
     } catch (err: any) {
       const networkErrorMsg: ChatMessage = {
@@ -701,7 +727,12 @@ function MainChatApp() {
                   data-testid="assistant-message"
                   className="bg-[#0b0e24]/80 backdrop-blur-xl border border-indigo-500/20 hover:border-indigo-500/40 rounded-3xl rounded-tl-md p-5 max-w-[92%] sm:max-w-[85%] text-sm shadow-[0_0_30px_rgba(0,0,0,0.4)] text-slate-100 space-y-4 transition"
                 >
-                  <FormattedMessage content={msg.content} />
+                  <div className="relative">
+                    <FormattedMessage content={msg.content} />
+                    {msg.isStreaming && (
+                      <span className="inline-block w-2 h-4 bg-cyan-400 rounded-sm animate-pulse ml-1 align-middle shadow-[0_0_8px_#22d3ee]" />
+                    )}
+                  </div>
 
                   {/* Metadata Card Footer matching assignment test requirements */}
                   {msg.metadata && (
