@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
 
-app = FastAPI(title="Lyftr AI Gateway", lifespan=lifespan)
+app = FastAPI(title="AI Gateway", lifespan=lifespan)
 
 # Setup CORS
 allowed_origins_env = os.environ.get("ALLOWED_ORIGINS", "*")
