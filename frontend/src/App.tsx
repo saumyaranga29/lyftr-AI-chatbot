@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Component, ErrorInfo, ReactNode } from 'react';
 import FormattedMessage from './components/FormattedMessage';
 import {
   Send,
@@ -19,16 +19,62 @@ import {
   BarChart3,
   PenTool,
   BookOpen,
-  Paperclip,
-  Mic,
   Clock,
   Key,
   ChevronRight,
   Settings,
   MessageSquare,
-  Bookmark,
-  X
+  X,
+  RefreshCw
 } from 'lucide-react';
+
+interface ErrorBoundaryProps {
+  children: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error?: Error;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("ErrorBoundary caught:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center h-screen bg-[#060814] text-white p-6 text-center space-y-4">
+          <AlertTriangle className="w-12 h-12 text-amber-400 animate-pulse" />
+          <h2 className="text-xl font-bold">Something encountered an issue</h2>
+          <p className="text-xs text-slate-400 font-mono max-w-md">
+            {this.state.error?.message || "Render error occurred."}
+          </p>
+          <button
+            onClick={() => {
+              try { localStorage.removeItem('ai_gateway_sessions'); } catch {}
+              window.location.reload();
+            }}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-xl text-xs font-semibold"
+          >
+            Reset and Reload
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 interface MessageMetadata {
   resolution_source: 'LIVE_INFERENCE' | 'LLM_CACHE';
@@ -52,6 +98,12 @@ interface HealthStatus {
   status: string;
   keys_configured: number;
   cache_enabled: boolean;
+}
+
+interface SavedSession {
+  id: string;
+  preview: string;
+  timestamp: string;
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -79,7 +131,6 @@ function getCleanSummary(content: string): { summary: string; hasCode: boolean; 
     const lines = content.split('\n');
     const langMatch = content.match(/```([a-zA-Z0-9_-]+)?/);
     const lang = langMatch && langMatch[1] ? langMatch[1] : 'code';
-    // Find first descriptive text line outside code fence if any
     const descriptiveLine = lines.find(l => !l.trim().startsWith('```') && l.trim().length > 10 && !l.trim().startsWith('def ') && !l.trim().startsWith('function '));
     const codeLineCount = lines.length;
     if (descriptiveLine) {
@@ -124,13 +175,7 @@ const ACTION_CARDS = [
   }
 ];
 
-interface SavedSession {
-  id: string;
-  preview: string;
-  timestamp: string;
-}
-
-export default function App() {
+function MainChatApp() {
   const [sessionId, setSessionId] = useState<string>('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState<string>('');
@@ -146,24 +191,6 @@ export default function App() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [recentSessions, setRecentSessions] = useState<SavedSession[]>([]);
 
-  const fetchSessionHistory = async () => {
-    setHistoryLoading(true);
-    setActiveModal('history');
-    try {
-      const res = await fetch(`${API_BASE_URL}/sessions/${sessionId}/messages`);
-      if (res.ok) {
-        const data = await res.json();
-        setSessionHistoryData(data);
-      } else {
-        setSessionHistoryData({ error: `Session not found in SQLite yet (HTTP ${res.status})` });
-      }
-    } catch (err: any) {
-      setSessionHistoryData({ error: err.message });
-    } finally {
-      setHistoryLoading(false);
-    }
-  };
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -175,22 +202,31 @@ export default function App() {
     try {
       const saved = localStorage.getItem('ai_gateway_sessions');
       if (saved) {
-        setRecentSessions(JSON.parse(saved));
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          setRecentSessions(parsed.filter(item => item && typeof item === 'object' && item.id));
+        }
       }
     } catch {
-      // Ignore
+      // Safe fallback
     }
   }, []);
 
   const saveSessionToStorage = (sessId: string, firstMsgPreview: string) => {
     try {
       const existing = localStorage.getItem('ai_gateway_sessions');
-      let list: SavedSession[] = existing ? JSON.parse(existing) : [];
-      const foundIdx = list.findIndex(s => s.id === sessId);
+      let list: SavedSession[] = [];
+      if (existing) {
+        const parsed = JSON.parse(existing);
+        if (Array.isArray(parsed)) {
+          list = parsed.filter(item => item && typeof item === 'object' && item.id);
+        }
+      }
+      const foundIdx = list.findIndex(s => s && s.id === sessId);
       if (foundIdx === -1) {
         list.unshift({
           id: sessId,
-          preview: firstMsgPreview.substring(0, 32),
+          preview: (firstMsgPreview || 'New conversation').substring(0, 32),
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         });
         if (list.length > 8) list = list.slice(0, 8);
@@ -198,11 +234,12 @@ export default function App() {
         setRecentSessions(list);
       }
     } catch {
-      // Ignore
+      // Safe fallback
     }
   };
 
   const loadPastSession = async (targetId: string) => {
+    if (!targetId) return;
     setIsLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/sessions/${targetId}/messages`);
@@ -267,6 +304,24 @@ export default function App() {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const fetchSessionHistory = async () => {
+    setHistoryLoading(true);
+    setActiveModal('history');
+    try {
+      const res = await fetch(`${API_BASE_URL}/sessions/${sessionId}/messages`);
+      if (res.ok) {
+        const data = await res.json();
+        setSessionHistoryData(data);
+      } else {
+        setSessionHistoryData({ error: `Session not found in SQLite yet (HTTP ${res.status})` });
+      }
+    } catch (err: any) {
+      setSessionHistoryData({ error: err.message });
+    } finally {
+      setHistoryLoading(false);
+    }
   };
 
   const handleSendMessage = async (e?: React.FormEvent, directPrompt?: string) => {
@@ -374,15 +429,13 @@ export default function App() {
         <div className="absolute -top-32 -left-32 w-[550px] h-[550px] bg-purple-600/15 rounded-full blur-[130px]" />
         <div className="absolute top-1/3 left-1/3 w-[600px] h-[600px] bg-cyan-500/10 rounded-full blur-[140px]" />
         <div className="absolute -bottom-40 right-10 w-[700px] h-[700px] bg-blue-600/15 rounded-full blur-[150px]" />
-        
-        {/* Holographic light horizon wave */}
         <div className="absolute bottom-0 left-0 right-0 h-48 bg-gradient-to-t from-purple-950/20 via-cyan-950/10 to-transparent pointer-events-none" />
       </div>
 
       {/* Futuristic Glassmorphic Sidebar */}
       <aside className="w-64 h-full hidden md:flex flex-col justify-between p-4 bg-[#0a0d1e]/70 backdrop-blur-2xl border-r border-slate-800/80 z-20 shadow-2xl">
         <div className="space-y-6">
-          {/* Top Logo */}
+          {/* Top Logo without name */}
           <div className="flex items-center gap-2.5 px-2 py-1">
             <div className="relative">
               <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-cyan-400 via-indigo-500 to-purple-500 p-[1.5px] shadow-[0_0_15px_rgba(6,182,212,0.5)]">
@@ -447,14 +500,14 @@ export default function App() {
           </nav>
 
           {/* Recent Chats List */}
-          {recentSessions.length > 0 && (
+          {Array.isArray(recentSessions) && recentSessions.length > 0 && (
             <div className="pt-3 border-t border-slate-800/60">
               <div className="text-[10px] font-semibold tracking-wider uppercase text-slate-500 px-3 mb-1.5 flex items-center justify-between">
                 <span>Recent Chats</span>
                 <span className="text-[9px] font-mono text-cyan-400/80">SQLite</span>
               </div>
               <div className="space-y-1 max-h-40 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800 pr-1">
-                {recentSessions.map((s) => (
+                {recentSessions.filter(s => s && s.id).map((s) => (
                   <button
                     key={s.id}
                     onClick={() => loadPastSession(s.id)}
@@ -538,27 +591,19 @@ export default function App() {
               <div className="flex flex-col md:flex-row items-center justify-center gap-8 md:gap-12 w-full my-auto">
                 {/* 3D Holographic AI Avatar & Pedestal */}
                 <div className="relative flex items-center justify-center w-56 h-56 shrink-0">
-                  {/* Concentric rotating neon cyber rings */}
                   <div className="absolute inset-0 rounded-full border border-cyan-500/30 animate-rotate-slow pointer-events-none" />
                   <div className="absolute inset-3 rounded-full border border-dashed border-purple-500/40 animate-rotate-reverse pointer-events-none" />
                   <div className="absolute inset-7 rounded-full border border-indigo-400/20 pointer-events-none" />
-
-                  {/* Pulsing light aura */}
                   <div className="absolute w-44 h-44 rounded-full bg-gradient-to-tr from-cyan-500/20 to-purple-600/30 blur-2xl animate-pulse-glow" />
-
-                  {/* Holographic Glowing Pedestal base */}
                   <div className="absolute -bottom-3 w-40 h-8 rounded-[100%] bg-gradient-to-r from-transparent via-cyan-400/50 to-transparent blur-sm pointer-events-none" />
                   <div className="absolute -bottom-2 w-32 h-4 rounded-[100%] border-2 border-cyan-400/80 shadow-[0_0_20px_#06b6d4] pointer-events-none" />
 
                   {/* Glowing Hologram Robot Sphere / Avatar */}
                   <div className="relative z-10 w-36 h-36 rounded-full bg-gradient-to-b from-slate-900/90 to-purple-950/70 border border-cyan-400/50 shadow-[0_0_35px_rgba(6,182,212,0.4)] flex flex-col items-center justify-center animate-float overflow-hidden">
-                    {/* Glowing robot eyes / visor */}
                     <div className="w-16 h-8 rounded-full bg-slate-950 border border-cyan-400/80 flex items-center justify-center gap-3 shadow-[0_0_15px_#06b6d4]">
                       <span className="w-2.5 h-2.5 rounded-full bg-cyan-300 shadow-[0_0_10px_#22d3ee] animate-pulse" />
                       <span className="w-2.5 h-2.5 rounded-full bg-cyan-300 shadow-[0_0_10px_#22d3ee] animate-pulse" />
                     </div>
-
-                    {/* Floating mini energy orb in hands */}
                     <div className="mt-3 w-7 h-7 rounded-full bg-gradient-to-tr from-purple-400 to-cyan-300 blur-[1px] shadow-[0_0_18px_#a855f7] animate-spin" />
                   </div>
                 </div>
@@ -572,17 +617,18 @@ export default function App() {
                     Your intelligent AI assistant
                   </p>
 
-                  {recentSessions.length > 0 && (
+                  {/* 1-Click Resume Button if recent session exists */}
+                  {Array.isArray(recentSessions) && recentSessions.length > 0 && recentSessions[0]?.id && (
                     <button
                       onClick={() => loadPastSession(recentSessions[0].id)}
                       className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-200 text-xs transition shadow-sm"
                     >
                       <RefreshCw className="w-3.5 h-3.5 text-purple-400" />
-                      <span>Resume last chat: <strong className="text-white font-medium">"{recentSessions[0].preview}"</strong></span>
+                      <span>Resume last chat: <strong className="text-white font-medium">"{recentSessions[0].preview || 'Conversation'}"</strong></span>
                     </button>
                   )}
 
-                  {/* 4 Action Holographic Cards matching user screenshot */}
+                  {/* 4 Action Holographic Cards */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-4">
                     {ACTION_CARDS.map((card, idx) => {
                       const IconComponent = card.icon;
@@ -757,7 +803,7 @@ export default function App() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Floating Holographic Pill Input Capsule matching reference image */}
+        {/* Floating Holographic Pill Input Capsule */}
         <div className="px-4 sm:px-8 pb-5 pt-2">
           {simulateFailure !== 'none' && (
             <div className="max-w-3xl mx-auto mb-2 px-4 py-1.5 bg-amber-500/10 border border-amber-500/30 rounded-full flex items-center justify-between text-xs text-amber-300">
@@ -908,7 +954,6 @@ export default function App() {
                 <span>Session Conversation History</span>
               </div>
               <div className="flex items-center gap-2">
-                {/* View switcher tabs */}
                 <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
                   <button
                     onClick={() => setHistoryViewTab('summary')}
@@ -938,7 +983,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Content Display */}
             <div className="flex-1 overflow-y-auto bg-slate-950/90 rounded-2xl p-4 border border-slate-900 scrollbar-thin scrollbar-thumb-slate-800">
               {historyLoading ? (
                 <div className="flex items-center justify-center gap-2.5 text-slate-400 py-12">
@@ -1006,7 +1050,6 @@ export default function App() {
                   )}
                 </div>
               ) : (
-                /* Raw JSON View */
                 <pre className="font-mono text-xs text-slate-300 whitespace-pre-wrap leading-relaxed">
                   {JSON.stringify(sessionHistoryData, null, 2)}
                 </pre>
@@ -1028,5 +1071,13 @@ export default function App() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <MainChatApp />
+    </ErrorBoundary>
   );
 }
