@@ -6,12 +6,10 @@ A resilient, high-performance full-stack AI chatbot application featuring multi-
 
 ## 1. Live URLs
 
-- **Frontend Application**: `https://<your-frontend-deployment>.vercel.app` *(or Render/Cloudflare Pages)*
-- **Backend API Base**: `https://<your-backend-deployment>.onrender.com` *(or Railway/Fly.io)*
+- **Frontend Application**: https://frontend-sandy-two-38.vercel.app/
+- **Backend API Base**: `https://lyftr-ai-chatbot-backend-daii.onrender.com
 - **Public GitHub Repository**: https://github.com/saumyaranga29/lyftr-AI-chatbot
-- **Demo Video (2–3 minutes)**: `https://youtu.be/<your-demo-video-link>` *(or Loom link)*
 
-> **Note:** Fill in the live URLs above after deploying to your preferred hosting provider (e.g. Vercel for frontend, Render for backend).
 
 ---
 
